@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>כמה זמן לוקח כל שלב?</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #e0f2fe 0%, #f0f4ff 50%, #fef3c7 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+  }
+
+  h1 {
+    font-size: 2.1rem;
+    color: #1e3a8a;
+    margin-bottom: 8px;
+    text-align: center;
+  }
+
+  .subtitle {
+    color: #64748b;
+    font-size: 1.05rem;
+    margin-bottom: 36px;
+    text-align: center;
+  }
+
+  .activity-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 56px;
+    justify-content: center;
+  }
+
+  #pieCanvas {
+    cursor: grab;
+    filter: drop-shadow(0 8px 40px rgba(30,58,138,0.18));
+  }
+
+  #pieCanvas:active { cursor: grabbing; }
+
+  /* LEGEND */
+  .legend {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 270px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: white;
+    border-radius: 14px;
+    padding: 12px 16px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+    border-right: 5px solid transparent;
+    transition: box-shadow 0.2s, transform 0.2s;
+  }
+
+  .legend-item:hover {
+    box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+    transform: translateX(-4px);
+  }
+
+  .legend-dot {
+    width: 16px; height: 16px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .legend-text { flex: 1; }
+
+  .legend-name {
+    font-size: 0.97rem;
+    font-weight: 600;
+    color: #1e293b;
+  }
+
+  .legend-sub {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-top: 2px;
+  }
+
+  .legend-pct {
+    font-size: 1.4rem;
+    font-weight: 800;
+    min-width: 52px;
+    text-align: left;
+    direction: ltr;
+  }
+
+  .hint {
+    margin-top: 24px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .hint span {
+    display: inline-block;
+    background: #1e3a8a;
+    color: white;
+    border-radius: 20px;
+    padding: 5px 18px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-top: 6px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🧑‍💻 עבודת המתכנת.ת</h1>
+<p class="subtitle">כמה זמן תתנו לכל שלב? גררו את נקודות החלוקה על העיגול כדי לשנות את האחוזים</p>
+
+<div class="activity-wrapper">
+  <canvas id="pieCanvas" width="420" height="420"></canvas>
+
+  <div>
+    <div class="legend" id="legend"></div>
+    <div class="hint">
+      כל שלב חייב לקבל לפחות 5%<br>
+      <span>סה"כ תמיד = 100%</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('pieCanvas');
+const ctx = canvas.getContext('2d');
+const cx = canvas.width / 2;
+const cy = canvas.height / 2;
+const R = 185;
+const HANDLE_R = 12;
+const MIN_PCT = 7;
+
+const stages = [
+  { name: "הבנת הדרישות",   sub: "קריאה והבנת הבעיה",                color: "#6366f1" },
+  { name: "תכנון הפתרון",   sub: "לפני שנוגעים במקלדת",              color: "#0ea5e9" },
+  { name: "כתיבת הקוד",     sub: "עריכה בסביבת הפיתוח",              color: "#f97316" },
+  { name: "סדר וקריאות",    sub: "שמות משמעותיים, ארגון, הערות",     color: "#eab308" },
+  { name: "הרצה ובדיקות",    sub: "מקרים רגילים | מקרים מיוחדים",     color: "#10b981" },
+  { name: "דיבאג ותיקון",   sub: "איתור שגיאות ותיקונן",             color: "#ef4444" },
+];
+
+const N = stages.length;
+
+// Start angles for each divider (N dividers, one per slice boundary)
+// dividers[i] is the angle where slice i ends and slice i+1 begins
+// We start all slices equal
+let dividers = [];
+for (let i = 0; i < N; i++) {
+  dividers.push(-Math.PI / 2 + (i + 1) * (2 * Math.PI / N));
+}
+
+function getStartAngle(i) {
+  return i === 0 ? -Math.PI / 2 : dividers[i - 1];
+}
+
+function getEndAngle(i) {
+  return dividers[i];
+}
+
+function arcToPct(arc) {
+  return Math.round((arc / (2 * Math.PI)) * 100);
+}
+
+function getPcts() {
+  const pcts = [];
+  for (let i = 0; i < N; i++) {
+    const start = getStartAngle(i);
+    let end = getEndAngle(i);
+    let arc = end - start;
+    while (arc < 0) arc += 2 * Math.PI;
+    while (arc > 2 * Math.PI) arc -= 2 * Math.PI;
+    pcts.push(Math.max(MIN_PCT, arcToPct(arc)));
+  }
+  return pcts;
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  const pcts = getPcts();
+
+  // Draw slices
+  for (let i = 0; i < N; i++) {
+    const startA = getStartAngle(i);
+    const endA = getEndAngle(i);
+
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, startA, endA);
+    ctx.closePath();
+    ctx.fillStyle = stages[i].color;
+    ctx.fill();
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Labels inside slice
+    {
+      let arc = endA - startA;
+      while (arc < 0) arc += 2 * Math.PI;
+      const midA = startA + arc / 2;
+      const lr = R * 0.64;
+      const lx = cx + lr * Math.cos(midA);
+      const ly = cy + lr * Math.sin(midA);
+
+      ctx.save();
+      ctx.translate(lx, ly);
+      let textAngle = midA;
+      if (textAngle > Math.PI / 2 && textAngle < Math.PI * 1.5) textAngle += Math.PI;
+      ctx.rotate(textAngle);
+      ctx.fillStyle = 'white';
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 4;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      if (pcts[i] >= 15) {
+        // Show name + percentage
+        ctx.font = 'bold 13px Segoe UI';
+        ctx.fillText(stages[i].name, 0, -10);
+        ctx.font = 'bold 17px Segoe UI';
+        ctx.fillText(pcts[i] + '%', 0, 10);
+      } else {
+        // Always show at least the percentage
+        ctx.font = 'bold 15px Segoe UI';
+        ctx.fillText(pcts[i] + '%', 0, 0);
+      }
+      ctx.restore();
+    }
+  }
+
+  // Draw divider handles on perimeter
+  for (let i = 0; i < N; i++) {
+    const a = dividers[i];
+    const hx = cx + R * Math.cos(a);
+    const hy = cy + R * Math.sin(a);
+
+    ctx.beginPath();
+    ctx.arc(hx, hy, HANDLE_R, 0, Math.PI * 2);
+    ctx.fillStyle = dragging === i ? 'white' : 'rgba(255,255,255,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = stages[i].color;
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+  }
+
+  // Center donut hole
+  ctx.beginPath();
+  ctx.arc(cx, cy, 52, 0, Math.PI * 2);
+  ctx.fillStyle = 'white';
+  ctx.shadowColor = 'rgba(0,0,0,0.08)';
+  ctx.shadowBlur = 10;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = '#1e3a8a';
+  ctx.font = 'bold 13px Segoe UI';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('גרור', cx, cy - 9);
+  ctx.fillText('את הנקודות', cx, cy + 9);
+
+  updateLegend(pcts);
+}
+
+function updateLegend(pcts) {
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  stages.forEach((s, i) => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.style.borderRightColor = s.color;
+    item.innerHTML = `
+      <div class="legend-dot" style="background:${s.color}"></div>
+      <div class="legend-text">
+        <div class="legend-name">${s.name}</div>
+        <div class="legend-sub">${s.sub}</div>
+      </div>
+      <div class="legend-pct" style="color:${s.color}">${pcts[i]}%</div>
+    `;
+    legend.appendChild(item);
+  });
+}
+
+// Drag logic
+let dragging = null;
+
+function getAngle(e) {
+  const rect = canvas.getBoundingClientRect();
+  return Math.atan2(e.clientY - rect.top - cy, e.clientX - rect.left - cx);
+}
+
+function nearHandle(e) {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  for (let i = 0; i < N; i++) {
+    const hx = cx + R * Math.cos(dividers[i]);
+    const hy = cy + R * Math.sin(dividers[i]);
+    const dx = mx - hx, dy = my - hy;
+    if (Math.sqrt(dx*dx + dy*dy) < HANDLE_R + 6) return i;
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  const h = nearHandle(e);
+  if (h !== null) { dragging = h; lastMouseAngle = null; e.preventDefault(); }
+});
+
+const MIN_ARC = (7 / 100) * 2 * Math.PI;
+const FULL_ARC = 2 * Math.PI;
+
+function getArc(i) {
+  let arc = getEndAngle(i) - getStartAngle(i);
+  while (arc < 0) arc += 2 * Math.PI;
+  while (arc > 2 * Math.PI) arc -= 2 * Math.PI;
+  return arc;
+}
+
+let lastMouseAngle = null;
+
+canvas.addEventListener('mousemove', (e) => {
+  if (dragging === null) return;
+
+  const mouseAngle = getAngle(e);
+  if (lastMouseAngle === null) { lastMouseAngle = mouseAngle; return; }
+
+  let delta = mouseAngle - lastMouseAngle;
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta < -Math.PI) delta += 2 * Math.PI;
+  lastMouseAngle = mouseAngle;
+
+  // Save current divider position
+  const savedDivider = dividers[dragging];
+
+  // Apply delta tentatively
+  dividers[dragging] += delta;
+  while (dividers[dragging] > Math.PI) dividers[dragging] -= 2 * Math.PI;
+  while (dividers[dragging] < -Math.PI) dividers[dragging] += 2 * Math.PI;
+
+  // Check all slices: each must be >= 7%, and dynamic max = 100% minus all others at minimum
+  let valid = true;
+  for (let i = 0; i < N; i++) {
+    const arc = getArc(i);
+    // Min check
+    if (arc < MIN_ARC - 0.001) { valid = false; break; }
+    // Max check: this slice cannot be larger than 100% minus all other slices at minimum
+    const othersMins = (N - 1) * MIN_ARC;
+    const dynamicMax = FULL_ARC - othersMins;
+    if (arc > dynamicMax + 0.001) { valid = false; break; }
+  }
+
+  // If any slice violated limits, revert
+  if (!valid) {
+    dividers[dragging] = savedDivider;
+  }
+
+  draw();
+});
+
+canvas.addEventListener('mouseup', () => { dragging = null; lastMouseAngle = null; draw(); });
+canvas.addEventListener('mouseleave', () => { dragging = null; });
+
+// Cursor feedback
+canvas.addEventListener('mousemove', (e) => {
+  if (dragging !== null) return;
+  canvas.style.cursor = nearHandle(e) !== null ? 'grab' : 'default';
+});
+
+draw();
+</script>
+</body>
+</html>
